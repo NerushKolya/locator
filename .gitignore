@@ -1,0 +1,30 @@
+# Editors / OS
+.obsidian/
+.idea/
+.vscode/
+.zed/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit)
+.env
+.env.*
+!.env.example
+local.properties
+*.jks
+*.keystore
+google-services.json
+
+# Android / Gradle
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Node / PHP / Go
+node_modules/
+vendor/
+dist/
+coverage/

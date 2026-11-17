@@ -1,0 +1,1921 @@
+openapi: 3.1.0
+info:
+  title: Locator API
+  version: 0.1.0
+  summary: REST contract between the Locator Android app and the core service.
+  description: |
+    Contract-first API of Locator, a family location-sharing product based on
+    explicit, mutual and revocable consent.
+
+    Status: draft for blueprint review. Covers the MVP (family beta).
+
+    Conventions (details in docs/api/README.md):
+    - JSON, camelCase, UTC timestamps in RFC 3339, identifiers are UUIDs.
+    - Errors use application/problem+json (RFC 9457) with a stable `code`.
+    - Unknown request fields are rejected; clients must ignore unknown response fields.
+    - Location data of another person is returned only through a shared group and
+      only according to the visibility rules (group boundary, reciprocity, SOS).
+    - The event stream (`/v1/stream`) is described in docs/api/realtime-protocol.md.
+servers:
+  - url: http://localhost:8080
+    description: Local development (emulator uses http://10.0.2.2:8080)
+  - url: https://{host}
+    description: Deployed environment
+    variables:
+      host:
+        default: locator.example.org
+tags:
+  - name: Service
+    description: Health probe and remote configuration.
+  - name: Auth
+    description: Sign-in with Google, session refresh and sign-out.
+  - name: Me
+    description: The current user, their device and account deletion.
+  - name: Sharing
+    description: The person's own sharing state, pause, mode and frequency profile.
+  - name: Reports
+    description: Uploads from the location engine (points and device status).
+  - name: Groups
+    description: Groups, members, roles and per-group alert preferences.
+  - name: Invitations
+    description: Single-use invitations by code or link.
+  - name: Map
+    description: Group snapshot, fresh-location requests and stream tickets.
+  - name: Places
+    description: Places of a group and subscriptions to arrival and departure alerts.
+  - name: SOS
+    description: Emergency signal to all members of all groups of the sender.
+  - name: Privacy
+    description: Transparency view and access log.
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Service]
+      operationId: getHealth
+      summary: Liveness and readiness probe
+      security: []
+      responses:
+        '200':
+          description: Service is ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Service is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+
+  /v1/config:
+    get:
+      tags: [Service]
+      operationId: getRemoteConfig
+      summary: Remote configuration for the app and the location engine
+      description: |
+        Versioned configuration published by the operator: engine parameters,
+        map style URL, limits and legal page URLs. The app caches it and
+        refetches when a report response announces a newer `configVersion`.
+        Supports conditional requests with `If-None-Match`.
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current configuration.
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteConfig'
+        '304':
+          description: Not modified.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/nonce:
+    post:
+      tags: [Auth]
+      operationId: createAuthNonce
+      summary: Issue a nonce for Sign in with Google
+      security: []
+      responses:
+        '200':
+          description: Nonce to pass to Credential Manager.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expiresInS]
+                properties:
+                  nonce: { type: string }
+                  expiresInS: { type: integer, examples: [300] }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/auth/google:
+    post:
+      tags: [Auth]
+      operationId: signInWithGoogle
+      summary: Sign in or register with a Google ID token
+      description: |
+        Verifies the ID token and creates a session bound to the device.
+        Signing in makes this device the account's only active device; the
+        previous device is signed out.
+
+        A new person must send `confirmations` (age 13+ and terms). Without
+        them the response is `409 confirmation_required` and no account is
+        created.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleSignInRequest'
+            examples:
+              returning:
+                summary: Returning user
+                value:
+                  idToken: eyJhbGciOiJSUzI1NiIs...
+                  nonce: n-4f1c2a
+                  device:
+                    installationId: 6f1d7c0e-8a53-4e0e-9d55-0f3c1b2a7e11
+                    distribution: internal
+                    manufacturer: OnePlus
+                    model: CPH2653
+                    osVersion: '15'
+                    appVersion: 0.1.0
+                    locale: uk
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: The ID token is invalid, expired or issued for another audience (`invalid_id_token`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: New account needs age and terms confirmation (`confirmation_required`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Exchange a refresh token for a new token pair
+      description: |
+        The refresh token is rotated at every use. Presenting a token that was
+        already rotated revokes the session (`401 session_revoked`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              additionalProperties: false
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New token pair.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: signOut
+      summary: Sign out and revoke the current session
+      description: Sharing stops on this device; the group sees the member as offline from this moment.
+      responses:
+        '204':
+          description: Session revoked.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me:
+    get:
+      tags: [Me]
+      operationId: getMe
+      summary: Current user, device and sharing settings
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Me]
+      operationId: deleteAccount
+      summary: Delete the account and its data
+      description: |
+        Stops sharing, revokes all sessions and removes the user from all
+        groups immediately. Location data is deleted within minutes, remaining
+        records within 30 days. Ownership of groups passes to the longest-standing
+        admin, otherwise to the longest-standing member; groups without other
+        members are deleted.
+      responses:
+        '204':
+          description: Deletion started; the session is no longer valid.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/device/push-token:
+    put:
+      tags: [Me]
+      operationId: updatePushToken
+      summary: Register or replace the push token of the active device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              additionalProperties: false
+              properties:
+                token: { type: string, minLength: 1, maxLength: 4096 }
+      responses:
+        '204':
+          description: Stored.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /v1/me/sharing:
+    get:
+      tags: [Sharing]
+      operationId: getSharing
+      summary: The server's mirror of my sharing settings
+      responses:
+        '200':
+          description: Sharing settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharingSettings'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Sharing]
+      operationId: updateSharing
+      summary: Report a change of my sharing state, pause, mode or profile
+      description: |
+        The phone is the source of truth for its owner's sharing state. The
+        change is applied only if `rev` is higher than the stored revision;
+        otherwise the stored settings are returned unchanged. The same state
+        also travels in every device report, so a lost request is repaired by
+        the next report.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharingUpdate'
+            examples:
+              pauseOneHour:
+                value: { rev: 42, state: paused, pauseUntil: '2026-11-15T19:00:00Z' }
+              resume:
+                value: { rev: 43, state: active }
+      responses:
+        '200':
+          description: Current settings after the request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharingSettings'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /v1/me/reports:
+    post:
+      tags: [Reports]
+      operationId: postDeviceReport
+      summary: Upload points and device status (heartbeat when there are no points)
+      description: |
+        Idempotent by `pointId`: a re-sent point is acknowledged in `accepted`
+        and stored once. The server computes the position time as
+        `receivedAt - ageMs`. The current position moves only to a later
+        position time. The response carries commands for the location engine.
+
+        Limits: at most 200 points and 256 KB per request; `Content-Encoding: gzip`
+        is supported. Points are accepted only while sharing is active or an
+        SOS is in progress; points recorded before a pause began (position
+        time earlier than the pause start) are still accepted into history
+        but never move the live marker of a paused person.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceReport'
+            examples:
+              movingPoint:
+                summary: One point while walking
+                value:
+                  sentAt: '2026-11-15T16:20:31.120Z'
+                  points:
+                    - pointId: 0b8f2f0a-52b1-4c6e-a1b5-3a2b9d7e6c10
+                      seq: 1841
+                      lat: 50.4501
+                      lon: 30.5234
+                      accuracyM: 12.5
+                      speedMps: 1.4
+                      deviceTime: '2026-11-15T16:20:29.900Z'
+                      ageMs: 1220
+                      timeSource: monotonic
+                      mode: moving_foot
+                      batteryPct: 76
+                      charging: false
+                      flags: []
+                  status:
+                    nextReportInS: 60
+                    engineMode: moving_foot
+                    sharing: { state: active, mode: always, profile: balanced, rev: 41 }
+                    batteryPct: 76
+                    charging: false
+                    locationEnabled: true
+                    permission: background
+                    precision: precise
+                    powerSaving: false
+                    batteryOptimizationExempt: true
+                    appVersion: 0.1.0
+              heartbeat:
+                summary: Stationary heartbeat without points
+                value:
+                  sentAt: '2026-11-15T03:15:00.000Z'
+                  points: []
+                  status:
+                    nextReportInS: 900
+                    engineMode: stationary
+                    sharing: { state: active, mode: always, profile: balanced, rev: 41 }
+                    batteryPct: 64
+                    charging: false
+                    locationEnabled: true
+                    permission: background
+                    precision: precise
+                    powerSaving: false
+                    batteryOptimizationExempt: true
+                    appVersion: 0.1.0
+      responses:
+        '200':
+          description: Report processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceReportResult'
+              examples:
+                withCommand:
+                  value:
+                    serverTime: '2026-11-15T16:20:31.400Z'
+                    accepted: [0b8f2f0a-52b1-4c6e-a1b5-3a2b9d7e6c10]
+                    rejected: []
+                    configVersion: 7
+                    commands:
+                      - id: 5d0e1a3c-0f55-4f8e-9a11-7c2d4b6e8f90
+                        type: active_view
+                        leaseS: 120
+                        viewerUserIds: [a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d]
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413':
+          description: Too many points or body too large (`payload_too_large`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/me/sos/{sosId}:
+    put:
+      tags: [SOS]
+      operationId: startSos
+      summary: Start an SOS (idempotent by client-generated id)
+      description: |
+        Notifies all members of all groups of the sender, regardless of
+        reciprocity and pauses. While the SOS is active the sender's reports
+        are accepted even if sharing was paused. Ends automatically after the
+        configured duration (15 min by default).
+      parameters:
+        - $ref: '#/components/parameters/SosId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SosStart'
+      responses:
+        '200':
+          description: SOS is active (also returned for a repeated request).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sos'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: Another SOS of this user is already active (`sos_already_active`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/me/sos/{sosId}/end:
+    post:
+      tags: [SOS]
+      operationId: endSos
+      summary: End my SOS
+      parameters:
+        - $ref: '#/components/parameters/SosId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, enum: [safe, cancelled] }
+      responses:
+        '200':
+          description: SOS ended (also returned if it had already ended).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sos'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/sos/active:
+    get:
+      tags: [SOS]
+      operationId: listActiveSos
+      summary: Active SOS episodes of members of my groups, with positions
+      responses:
+        '200':
+          description: Active SOS episodes (possibly empty).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Sos' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/transparency:
+    get:
+      tags: [Privacy]
+      operationId: getTransparency
+      summary: Who sees what about me
+      description: |
+        Groups and who can see my position now, place subscriptions that
+        concern me, the latest fresh-location requests and operator actions.
+      responses:
+        '200':
+          description: Transparency view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransparencyView'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/access-log:
+    get:
+      tags: [Privacy]
+      operationId: listAccessLog
+      summary: My access log (newest first)
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessLogPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/groups:
+    get:
+      tags: [Groups]
+      operationId: listGroups
+      summary: Groups I am a member of
+      responses:
+        '200':
+          description: My groups.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Group' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Groups]
+      operationId: createGroup
+      summary: Create a group; the caller becomes its owner
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupInput'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: The caller is already in the maximum number of groups (`group_limit_reached`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /v1/groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Groups]
+      operationId: getGroup
+      summary: Group details
+      responses:
+        '200':
+          description: Group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Groups]
+      operationId: renameGroup
+      summary: Rename the group (owner or admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupInput'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Groups]
+      operationId: deleteGroup
+      summary: Delete the group with its memberships, invitations and places (owner)
+      responses:
+        '204':
+          description: Deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/groups/{groupId}/snapshot:
+    get:
+      tags: [Map]
+      operationId: getGroupSnapshot
+      summary: Visibility-filtered state of the group for the map
+      description: |
+        All members with their statuses; positions only where the visibility
+        rules allow. Used when the map opens and as the polling fallback
+        (every 30 s) while the stream is unavailable.
+
+        A viewer who is not sharing receives names, statuses and battery but
+        no positions (`positionVisibility: hidden_viewer_not_sharing`), except
+        for members with an active SOS.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupSnapshot'
+              examples:
+                sharingViewer:
+                  value:
+                    serverTime: '2026-11-15T16:21:00Z'
+                    lastEventId: '184467'
+                    group: { id: 9c1e2d3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f, name: Family, myRole: owner, memberCount: 2, createdAt: '2026-11-01T10:00:00Z' }
+                    viewer: { sharingActive: true, positionsVisible: true }
+                    members:
+                      - userId: a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                        displayName: Olena
+                        role: member
+                        joinedAt: '2026-11-02T08:00:00Z'
+                        sharing: { state: active, mode: always }
+                        freshness: live
+                        lastSeenAt: '2026-11-15T16:20:31Z'
+                        expectedIntervalS: 60
+                        battery: { pct: 76, charging: false }
+                        deviceFlags: []
+                        sosActive: false
+                        positionVisibility: visible
+                        position: { lat: 50.4501, lon: 30.5234, accuracyM: 12.5, fixedAt: '2026-11-15T16:20:30Z', flags: [] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/groups/{groupId}/members/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/UserId'
+    patch:
+      tags: [Groups]
+      operationId: changeMemberRole
+      summary: Promote to admin or demote to member (owner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              additionalProperties: false
+              properties:
+                role: { type: string, enum: [admin, member] }
+      responses:
+        '204':
+          description: Role changed.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Groups]
+      operationId: removeMember
+      summary: Remove a member, or leave the group when `userId` is the caller
+      description: |
+        Owner removes anyone; admin removes members only. A member or admin
+        may remove themselves (leave). The owner must transfer ownership or
+        delete the group before leaving (`409 owner_must_transfer`). Access is
+        lost immediately; open streams are closed.
+      responses:
+        '204':
+          description: Removed.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /v1/groups/{groupId}/ownership-transfer:
+    post:
+      tags: [Groups]
+      operationId: transferOwnership
+      summary: Transfer ownership to another member; the caller becomes admin (owner)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              additionalProperties: false
+              properties:
+                userId: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Transferred.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /v1/groups/{groupId}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Invitations]
+      operationId: listInvitations
+      summary: Pending and recent invitations of the group (owner or admin)
+      responses:
+        '200':
+          description: Invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Invitation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Invitations]
+      operationId: createInvitation
+      summary: Create a single-use invitation with a code and a link (owner or admin)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The group is full (`group_full`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/groups/{groupId}/invitations/{invitationId}:
+    delete:
+      tags: [Invitations]
+      operationId: revokeInvitation
+      summary: Revoke a pending invitation (owner or admin)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/InvitationId'
+      responses:
+        '204':
+          description: Revoked.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/invitations/{code}:
+    get:
+      tags: [Invitations]
+      operationId: previewInvitation
+      summary: Show what the invitation is for, before accepting
+      parameters:
+        - $ref: '#/components/parameters/InvitationCode'
+      responses:
+        '200':
+          description: Invitation preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationPreview'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/InvitationUnavailable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/invitations/{code}/accept:
+    post:
+      tags: [Invitations]
+      operationId: acceptInvitation
+      summary: Join the group; this is the explicit consent to share with it
+      parameters:
+        - $ref: '#/components/parameters/InvitationCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consentTextVersion]
+              additionalProperties: false
+              properties:
+                consentTextVersion:
+                  type: string
+                  description: Version of the consent text the person saw, from the preview.
+      responses:
+        '200':
+          description: Joined (also returned if the caller is already a member through this invitation).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `group_full`, `group_limit_reached` or `already_member`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '410': { $ref: '#/components/responses/InvitationUnavailable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/invitations/{code}/decline:
+    post:
+      tags: [Invitations]
+      operationId: declineInvitation
+      summary: Decline the invitation
+      parameters:
+        - $ref: '#/components/parameters/InvitationCode'
+      responses:
+        '204':
+          description: Declined.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/InvitationUnavailable' }
+
+  /v1/groups/{groupId}/members/{userId}/location-requests:
+    post:
+      tags: [Map]
+      operationId: requestFreshLocation
+      summary: Ask a member's phone for a fresh location
+      description: |
+        Always visible on the target phone and recorded in the target's access
+        log. Returns at once with the currently known position; the fresh
+        point arrives through the stream or by polling the request.
+        If no fresh point arrives within 60 s the request becomes `timed_out`.
+
+        Rejections: `409 viewer_not_sharing`, `409 target_not_sharing`,
+        `409 target_paused`, `429 rate_limited`.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '202':
+          description: Request sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationRequest'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/location-requests/{requestId}:
+    get:
+      tags: [Map]
+      operationId: getLocationRequest
+      summary: State of my fresh-location request
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Request state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationRequest'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/stream/tickets:
+    post:
+      tags: [Map]
+      operationId: createStreamTicket
+      summary: Issue a short-lived ticket for the event stream of one group
+      description: |
+        The ticket is valid for 60 s, usable once, and carries the caller's
+        entitlements for the group (statuses; positions only while the caller
+        shares; SOS always).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [groupId]
+              additionalProperties: false
+              properties:
+                groupId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamTicket'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/stream:
+    get:
+      tags: [Map]
+      operationId: openStream
+      summary: Event stream (Server-Sent Events) — served by the delivery service
+      description: |
+        Authenticated with a stream ticket in the `Authorization` header, not
+        with the access token. Event types and reconnection rules are in
+        docs/api/realtime-protocol.md.
+      security:
+        - streamTicket: []
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: Stream of events.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401':
+          description: Ticket missing, invalid, expired or already used.
+        '429':
+          description: Too many open streams for this user.
+
+  /v1/groups/{groupId}/places:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Places]
+      operationId: listPlaces
+      summary: Places of the group with my subscription to each
+      responses:
+        '200':
+          description: Places.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Place' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Places]
+      operationId: createPlace
+      summary: Create a place (owner or admin)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceInput'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Place'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The group already has the maximum number of places (`place_limit_reached`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /v1/groups/{groupId}/places/{placeId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/PlaceId'
+    patch:
+      tags: [Places]
+      operationId: updatePlace
+      summary: Change name, centre or radius (owner or admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceUpdate'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Place'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Places]
+      operationId: deletePlace
+      summary: Delete the place; subscribers are notified (owner or admin)
+      responses:
+        '204':
+          description: Deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/groups/{groupId}/places/{placeId}/subscription:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/PlaceId'
+    put:
+      tags: [Places]
+      operationId: subscribeToPlace
+      summary: Subscribe to arrival and/or departure alerts, or change the subscription
+      description: |
+        Members whom the subscription concerns get a quiet notification and see
+        the subscriber on their transparency screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceSubscription'
+      responses:
+        '200':
+          description: Subscription stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceSubscription'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Places]
+      operationId: unsubscribeFromPlace
+      summary: Remove my subscription
+      responses:
+        '204':
+          description: Removed.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/groups/{groupId}/notification-preferences:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Groups]
+      operationId: getNotificationPreferences
+      summary: My alert preferences for this group
+      responses:
+        '200':
+          description: Preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Groups]
+      operationId: updateNotificationPreferences
+      summary: Change my alert preferences for this group
+      description: SOS notifications cannot be turned off.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreferences'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token issued by /v1/auth/google or /v1/auth/refresh (15 min).
+    streamTicket:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Stream ticket issued by /v1/stream/tickets (60 s, single use).
+
+  parameters:
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PlaceId:
+      name: placeId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    InvitationCode:
+      name: code
+      in: path
+      required: true
+      description: Invitation code (8 characters, case-insensitive).
+      schema: { type: string, minLength: 8, maxLength: 8 }
+    SosId:
+      name: sosId
+      in: path
+      required: true
+      description: Identifier generated by the app when the person starts the SOS.
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from the previous page (`nextCursor`).
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        Client-generated unique key. A repeated request with the same key
+        within 24 h returns the first response instead of creating a duplicate.
+      schema: { type: string, maxLength: 64 }
+
+  responses:
+    Unauthorized:
+      description: |
+        Missing, invalid or expired credentials (`unauthorized`), or the
+        session was revoked (`session_revoked`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: The caller's role does not allow this action (`forbidden`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: |
+        The resource does not exist or the caller has no access to it
+        (`not_found`). The two cases are not distinguished.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: The request conflicts with the current state; see `code`.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InvitationUnavailable:
+      description: The invitation is expired, used or revoked (`invitation_unavailable`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationError:
+      description: The request body or parameters are invalid (`validation_failed`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://locator.example.org/problems/validation-failed
+            title: Validation failed
+            status: 422
+            code: validation_failed
+            requestId: 01JCQ7W2ZK3M5V8N4T6R9Y0A1B
+            errors:
+              - field: radiusM
+                message: must be between 100 and 1000
+    RateLimited:
+      description: Too many requests (`rate_limited`).
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds to wait before retrying.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      description: Error body (RFC 9457) with Locator extensions.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          description: Stable machine-readable error code; see docs/api/README.md.
+        requestId: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+
+    RemoteConfig:
+      type: object
+      required: [version, mapStyleUrl, engine, limits, legal]
+      properties:
+        version: { type: integer }
+        mapStyleUrl: { type: string, format: uri }
+        engine:
+          type: object
+          description: |
+            Parameters of the location engine per mode and profile (intervals,
+            thresholds, lease lengths). Keys are defined by the location-engine
+            specification; the app clamps values to built-in bounds.
+          additionalProperties: true
+        limits:
+          type: object
+          properties:
+            maxGroupMembers: { type: integer, examples: [20] }
+            maxGroupsPerUser: { type: integer, examples: [10] }
+            maxPlacesPerGroup: { type: integer, examples: [20] }
+            placeRadiusMinM: { type: integer, examples: [100] }
+            placeRadiusMaxM: { type: integer, examples: [1000] }
+            invitationTtlH: { type: integer, examples: [72] }
+            sosDurationS: { type: integer, examples: [900] }
+            sosHoldMs: { type: integer, examples: [2000] }
+            lowBatteryPct: { type: integer, examples: [15] }
+        legal:
+          type: object
+          required: [termsUrl, privacyUrl, termsVersion]
+          properties:
+            termsUrl: { type: string, format: uri }
+            privacyUrl: { type: string, format: uri }
+            termsVersion: { type: string }
+        operatorMode:
+          type: boolean
+          description: True while operator capabilities are enabled on the server.
+
+    UserRef:
+      type: object
+      description: Public profile of a user as seen by members of a shared group.
+      required: [userId, displayName]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string }
+        photoUrl: { type: [string, 'null'], format: uri }
+
+    DeviceRegistration:
+      type: object
+      required: [installationId, distribution, appVersion]
+      additionalProperties: false
+      properties:
+        installationId:
+          type: string
+          format: uuid
+          description: Random identifier generated by the app at first start.
+        distribution: { type: string, enum: [internal, store] }
+        manufacturer: { type: string, maxLength: 64 }
+        model: { type: string, maxLength: 64 }
+        osVersion: { type: string, maxLength: 32 }
+        appVersion: { type: string, maxLength: 32 }
+        locale: { type: string, enum: [uk, en] }
+
+    GoogleSignInRequest:
+      type: object
+      required: [idToken, nonce, device]
+      additionalProperties: false
+      properties:
+        idToken: { type: string }
+        nonce: { type: string }
+        device: { $ref: '#/components/schemas/DeviceRegistration' }
+        confirmations:
+          type: object
+          description: Required when the account does not exist yet.
+          required: [age13, termsVersion]
+          additionalProperties: false
+          properties:
+            age13: { type: boolean, const: true }
+            termsVersion: { type: string }
+            operatorDisclosureVersion:
+              type: string
+              description: Sent by the internal flavor after the operator disclosure was confirmed.
+
+    TokenPair:
+      type: object
+      required: [accessToken, expiresInS, refreshToken]
+      properties:
+        accessToken: { type: string }
+        expiresInS: { type: integer, examples: [900] }
+        refreshToken: { type: string }
+
+    AuthSession:
+      allOf:
+        - $ref: '#/components/schemas/TokenPair'
+        - type: object
+          required: [me, isNewUser]
+          properties:
+            me: { $ref: '#/components/schemas/Me' }
+            isNewUser: { type: boolean }
+
+    Me:
+      type: object
+      required: [userId, displayName, email, locale, createdAt, device, sharing]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string }
+        photoUrl: { type: [string, 'null'], format: uri }
+        email: { type: string, format: email }
+        locale: { type: string, enum: [uk, en] }
+        createdAt: { type: string, format: date-time }
+        device:
+          type: object
+          required: [deviceId, distribution]
+          properties:
+            deviceId: { type: string, format: uuid }
+            distribution: { type: string, enum: [internal, store] }
+            pushTokenRegistered: { type: boolean }
+        sharing: { $ref: '#/components/schemas/SharingSettings' }
+
+    SharingState:
+      type: string
+      enum: [not_started, active, paused]
+    SharingMode:
+      type: string
+      enum: [always, on_request]
+      description: '`on_request` is available in the store release.'
+    FrequencyProfile:
+      type: string
+      enum: [economy, balanced, frequent]
+    EngineMode:
+      type: string
+      enum: [stationary, moving_foot, moving_vehicle, active_view, sos, on_request, paused]
+    Freshness:
+      type: string
+      enum: [live, recent, stale, offline]
+      description: |
+        Computed by the server: live — position age up to 2 min; recent — last
+        contact within 1.5 x the expected interval; stale — 1.5 x to 4 x;
+        offline — beyond 4 x.
+
+    SharingSettings:
+      type: object
+      required: [state, mode, profile, rev, updatedAt]
+      properties:
+        state: { $ref: '#/components/schemas/SharingState' }
+        mode: { $ref: '#/components/schemas/SharingMode' }
+        profile: { $ref: '#/components/schemas/FrequencyProfile' }
+        pausedAt: { type: [string, 'null'], format: date-time }
+        pauseUntil:
+          type: [string, 'null']
+          format: date-time
+          description: Null while paused means "until I resume".
+        pauseEnded:
+          type: boolean
+          description: A timed pause has ended but the phone has not resumed yet.
+        rev: { type: integer, format: int64 }
+        changedBy: { type: string, enum: [self, operator] }
+        updatedAt: { type: string, format: date-time }
+
+    SharingUpdate:
+      type: object
+      required: [rev]
+      additionalProperties: false
+      properties:
+        rev:
+          type: integer
+          format: int64
+          description: Revision counter kept by the phone; must increase with every change.
+        state: { type: string, enum: [active, paused] }
+        pauseUntil: { type: [string, 'null'], format: date-time }
+        mode: { $ref: '#/components/schemas/SharingMode' }
+        profile: { $ref: '#/components/schemas/FrequencyProfile' }
+        changedBy: { type: string, enum: [self, operator], default: self }
+
+    PointFlag:
+      type: string
+      enum: [low_accuracy, outlier, mock, coarse, on_demand]
+
+    LocationPointInput:
+      type: object
+      required: [pointId, seq, lat, lon, accuracyM, deviceTime, ageMs, timeSource, mode]
+      additionalProperties: false
+      properties:
+        pointId:
+          type: string
+          format: uuid
+          description: Generated on the phone; the idempotency key of the point.
+        seq: { type: integer, format: int64, minimum: 0 }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        accuracyM: { type: number, minimum: 0 }
+        altitudeM: { type: number }
+        speedMps: { type: number, minimum: 0 }
+        bearingDeg: { type: number, minimum: 0, maximum: 360 }
+        deviceTime:
+          type: string
+          format: date-time
+          description: Time of the fix by the phone's wall clock (diagnostics only).
+        ageMs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Age of the fix at the moment of sending, measured on the monotonic clock.
+        timeSource:
+          type: string
+          enum: [monotonic, wall_clock]
+          description: '`wall_clock` for points that survived a reboot in the buffer.'
+        mode: { $ref: '#/components/schemas/EngineMode' }
+        batteryPct: { type: integer, minimum: 0, maximum: 100 }
+        charging: { type: boolean }
+        flags:
+          type: array
+          items: { $ref: '#/components/schemas/PointFlag' }
+        requestId:
+          type: string
+          format: uuid
+          description: The fresh-location request this point answers.
+
+    DeviceStatusInput:
+      type: object
+      required: [nextReportInS, engineMode, sharing, locationEnabled, permission, precision, appVersion]
+      additionalProperties: false
+      properties:
+        nextReportInS:
+          type: integer
+          minimum: 5
+          maximum: 7200
+          description: When the phone promises to report again; the basis of freshness.
+        engineMode: { $ref: '#/components/schemas/EngineMode' }
+        sharing:
+          type: object
+          required: [state, mode, profile, rev]
+          additionalProperties: false
+          properties:
+            state: { $ref: '#/components/schemas/SharingState' }
+            mode: { $ref: '#/components/schemas/SharingMode' }
+            profile: { $ref: '#/components/schemas/FrequencyProfile' }
+            pauseUntil: { type: [string, 'null'], format: date-time }
+            rev: { type: integer, format: int64 }
+        batteryPct: { type: integer, minimum: 0, maximum: 100 }
+        charging: { type: boolean }
+        locationEnabled: { type: boolean }
+        permission: { type: string, enum: [none, foreground, background] }
+        precision: { type: string, enum: [precise, approximate] }
+        powerSaving: { type: boolean }
+        batteryOptimizationExempt: { type: boolean }
+        unusedAppRestrictions:
+          type: string
+          enum: [enabled, disabled, not_available, unknown]
+          description: |
+            State of the system's unused-app restrictions (app hibernation and
+            permission auto-reset) as reported by the platform; `enabled` means
+            Android may reset permissions and block push after months without use.
+        appVersion: { type: string, maxLength: 32 }
+        selfCheck:
+          type: object
+          description: Summary of the reliability self-check; statuses only, no coordinates.
+          additionalProperties:
+            type: string
+            enum: [ok, warning, problem, unknown]
+
+    DeviceReport:
+      type: object
+      required: [sentAt, points, status]
+      additionalProperties: false
+      properties:
+        sentAt:
+          type: string
+          format: date-time
+          description: Phone wall-clock time of sending; used only to correct `wall_clock` points.
+        points:
+          type: array
+          maxItems: 200
+          items: { $ref: '#/components/schemas/LocationPointInput' }
+        status: { $ref: '#/components/schemas/DeviceStatusInput' }
+        ackCommandIds:
+          type: array
+          description: Commands from earlier responses that the engine has applied.
+          items: { type: string, format: uuid }
+
+    Command:
+      type: object
+      description: Instruction for the location engine.
+      required: [id, type]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [active_view, locate, resume_sharing, refresh_config, refresh_push_token, start_sharing]
+          description: |
+            `resume_sharing` tells the engine that a timed pause has ended on the
+            server, in case it has not resumed by itself.
+            `start_sharing` is sent only to the internal flavor while operator
+            mode is on; the store flavor has no handler for it.
+        leaseS:
+          type: integer
+          description: For `active_view` — length of the lease in seconds.
+        viewerUserIds:
+          type: array
+          description: For `active_view` — who is viewing, for the persistent notification.
+          items: { type: string, format: uuid }
+        requestId:
+          type: string
+          format: uuid
+          description: For `locate` — the fresh-location request to answer.
+        requesterKind:
+          type: string
+          enum: [member, operator, system]
+        requesterUserId: { type: [string, 'null'], format: uuid }
+        expiresInS: { type: integer }
+
+    DeviceReportResult:
+      type: object
+      required: [serverTime, accepted, rejected, commands, configVersion]
+      properties:
+        serverTime: { type: string, format: date-time }
+        accepted:
+          type: array
+          description: Points stored now or earlier; the phone removes them from its buffer.
+          items: { type: string, format: uuid }
+        rejected:
+          type: array
+          description: Points that will never be accepted; the phone drops them.
+          items:
+            type: object
+            required: [pointId, reason]
+            properties:
+              pointId: { type: string, format: uuid }
+              reason: { type: string, enum: [invalid, too_old, not_sharing] }
+        commands:
+          type: array
+          items: { $ref: '#/components/schemas/Command' }
+        configVersion: { type: integer }
+
+    Position:
+      type: object
+      required: [lat, lon, accuracyM, fixedAt, flags]
+      properties:
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        accuracyM: { type: number }
+        fixedAt:
+          type: string
+          format: date-time
+          description: Position time computed by the server.
+        speedMps: { type: [number, 'null'] }
+        bearingDeg: { type: [number, 'null'] }
+        flags:
+          type: array
+          items: { $ref: '#/components/schemas/PointFlag' }
+
+    Role:
+      type: string
+      enum: [owner, admin, member]
+
+    Group:
+      type: object
+      required: [id, name, myRole, memberCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        myRole: { $ref: '#/components/schemas/Role' }
+        memberCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+
+    GroupInput:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+
+    MemberView:
+      type: object
+      description: What the viewer may see about one member of the group.
+      required: [userId, displayName, role, joinedAt, sharing, sosActive, positionVisibility]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string }
+        photoUrl: { type: [string, 'null'], format: uri }
+        role: { $ref: '#/components/schemas/Role' }
+        joinedAt: { type: string, format: date-time }
+        sharing:
+          type: object
+          required: [state, mode]
+          properties:
+            state: { $ref: '#/components/schemas/SharingState' }
+            mode: { $ref: '#/components/schemas/SharingMode' }
+            pausedAt: { type: [string, 'null'], format: date-time }
+            pauseUntil: { type: [string, 'null'], format: date-time }
+            pauseEnded: { type: boolean }
+        freshness:
+          oneOf:
+            - $ref: '#/components/schemas/Freshness'
+            - type: 'null'
+          description: Null when the member is not sharing (paused or not started).
+        lastSeenAt:
+          type: [string, 'null']
+          format: date-time
+          description: Last contact of the member's phone with the server.
+        expectedIntervalS: { type: [integer, 'null'] }
+        battery:
+          type: [object, 'null']
+          properties:
+            pct: { type: integer }
+            charging: { type: boolean }
+        deviceFlags:
+          type: array
+          description: States reported by the member's phone, shown on top of freshness.
+          items:
+            type: string
+            enum: [location_off, no_permission, foreground_only, approximate, power_saving, low_battery]
+        sosActive: { type: boolean }
+        positionVisibility:
+          type: string
+          enum: [visible, last_known, hidden_viewer_not_sharing, none]
+          description: |
+            visible — current position of a sharing member;
+            last_known — dimmed last position of a paused or silent member;
+            hidden_viewer_not_sharing — the viewer must resume sharing to see it;
+            none — the member has no position yet.
+        position:
+          oneOf:
+            - $ref: '#/components/schemas/Position'
+            - type: 'null'
+
+    GroupSnapshot:
+      type: object
+      required: [serverTime, group, viewer, members]
+      properties:
+        serverTime: { type: string, format: date-time }
+        lastEventId:
+          type: string
+          description: Stream events with an id up to this value are already reflected.
+        group: { $ref: '#/components/schemas/Group' }
+        viewer:
+          type: object
+          required: [sharingActive, positionsVisible]
+          properties:
+            sharingActive: { type: boolean }
+            positionsVisible: { type: boolean }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/MemberView' }
+
+    Invitation:
+      type: object
+      required: [id, code, link, status, expiresAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, examples: [K7M2X9QD] }
+        link: { type: string, format: uri }
+        status: { type: string, enum: [pending, accepted, declined, revoked, expired] }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        createdBy: { $ref: '#/components/schemas/UserRef' }
+        usedBy:
+          oneOf:
+            - $ref: '#/components/schemas/UserRef'
+            - type: 'null'
+
+    InvitationPreview:
+      type: object
+      required: [groupName, invitedBy, members, consentTextVersion, expiresAt]
+      properties:
+        groupName: { type: string }
+        invitedBy: { $ref: '#/components/schemas/UserRef' }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/UserRef' }
+        consentTextVersion:
+          type: string
+          description: Version of the consent text the app must show before accepting.
+        expiresAt: { type: string, format: date-time }
+
+    LocationRequest:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, fulfilled, timed_out] }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        position:
+          oneOf:
+            - $ref: '#/components/schemas/Position'
+            - type: 'null'
+          description: The known position at the time of the response, with its true age.
+
+    StreamTicket:
+      type: object
+      required: [ticket, expiresInS, streamUrl]
+      properties:
+        ticket: { type: string }
+        expiresInS: { type: integer, examples: [60] }
+        streamUrl: { type: string, format: uri }
+
+    PlaceSubscription:
+      type: object
+      required: [onArrival, onDeparture]
+      additionalProperties: false
+      properties:
+        onArrival: { type: boolean }
+        onDeparture: { type: boolean }
+        mutedMemberIds:
+          type: array
+          description: Members about whom the subscriber does not want alerts for this place.
+          items: { type: string, format: uuid }
+
+    Place:
+      type: object
+      required: [id, name, lat, lon, radiusM, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        radiusM: { type: integer }
+        createdBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+        subscriberCount: { type: integer }
+        mySubscription:
+          oneOf:
+            - $ref: '#/components/schemas/PlaceSubscription'
+            - type: 'null'
+
+    PlaceInput:
+      type: object
+      required: [name, lat, lon, radiusM]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        radiusM: { type: integer, minimum: 100, maximum: 1000 }
+
+    PlaceUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        radiusM: { type: integer, minimum: 100, maximum: 1000 }
+
+    SosStart:
+      type: object
+      required: [startedAgeMs]
+      additionalProperties: false
+      properties:
+        startedAgeMs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: How long ago the person started the SOS (it may have been queued offline).
+        lastKnownPoint:
+          $ref: '#/components/schemas/LocationPointInput'
+
+    Sos:
+      type: object
+      required: [id, user, startedAt, active]
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: '#/components/schemas/UserRef' }
+        groupIds:
+          type: array
+          description: Groups the caller shares with the sender.
+          items: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+        endReason: { type: [string, 'null'], enum: [safe, cancelled, timeout, null] }
+        active: { type: boolean }
+        position:
+          oneOf:
+            - $ref: '#/components/schemas/Position'
+            - type: 'null'
+
+    NotificationPreferences:
+      type: object
+      required: [lowBattery, noUpdates, membershipEvents]
+      additionalProperties: false
+      properties:
+        lowBattery: { type: boolean }
+        noUpdates: { type: boolean }
+        membershipEvents: { type: boolean }
+
+    AccessLogEntry:
+      type: object
+      required: [id, action, actorKind, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        action:
+          type: string
+          enum:
+            - location_requested
+            - operator_viewed_live
+            - operator_viewed_position
+            - operator_viewed_history
+            - operator_requested_location
+            - sharing_turned_on_remotely
+            - revival_push_sent
+        actorKind: { type: string, enum: [member, operator, system] }
+        actor:
+          oneOf:
+            - $ref: '#/components/schemas/UserRef'
+            - type: 'null'
+        groupId: { type: [string, 'null'], format: uuid }
+        outcome: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+
+    AccessLogPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AccessLogEntry' }
+        nextCursor: { type: [string, 'null'] }
+
+    TransparencyView:
+      type: object
+      required: [sharing, groups, placeSubscriptions, recentAccess, operatorMode]
+      properties:
+        sharing: { $ref: '#/components/schemas/SharingSettings' }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [group, canSeeMeNow]
+            properties:
+              group: { $ref: '#/components/schemas/Group' }
+              canSeeMeNow:
+                type: array
+                description: Members who can see my position right now (they share and so do I).
+                items: { $ref: '#/components/schemas/UserRef' }
+        placeSubscriptions:
+          type: array
+          description: Subscriptions that produce alerts about me.
+          items:
+            type: object
+            required: [groupId, placeId, placeName, subscriber, onArrival, onDeparture]
+            properties:
+              groupId: { type: string, format: uuid }
+              placeId: { type: string, format: uuid }
+              placeName: { type: string }
+              subscriber: { $ref: '#/components/schemas/UserRef' }
+              onArrival: { type: boolean }
+              onDeparture: { type: boolean }
+        recentAccess:
+          type: array
+          description: Latest access-log entries; the full list is at /v1/me/access-log.
+          items: { $ref: '#/components/schemas/AccessLogEntry' }
+        operatorMode:
+          type: boolean
+          description: True while operator capabilities are enabled and apply to this device.

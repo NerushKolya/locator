@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- Concept B "window with a light": 4 warm panes of an arched window + sill. Safe zone: circle r=33 at (54,54). -->
+  <defs>
+    <radialGradient id="glow" cx="54" cy="54" r="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFC861" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FFC861" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="54" cy="54" r="30" fill="url(#glow)"/>
+  <g fill="#FFC861">
+    <path d="M40 54 V50 A14 14 0 0 1 52 36.14 V54 Z"/>
+    <path d="M56 36.14 A14 14 0 0 1 68 50 V54 H56 Z"/>
+    <rect x="40" y="58" width="12" height="14" rx="1.5"/>
+    <rect x="56" y="58" width="12" height="14" rx="1.5"/>
+  </g>
+  <path d="M35 76.5 H73" stroke="#FFF3DC" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

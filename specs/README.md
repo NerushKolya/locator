@@ -32,5 +32,5 @@ specs/NNN-<feature>/
 
 | Spec | Roadmap stage | Status |
 |---|---|---|
-| [001-walking-skeleton](001-walking-skeleton/spec.md) | 1 — Walking skeleton | Draft |
+| [001-walking-skeleton](001-walking-skeleton/spec.md) | 1 — Walking skeleton | Approved |
 | [002-location-spike](002-location-spike/spec.md) | 2 — Location spike | Draft |

@@ -4,9 +4,18 @@
 
 **Created**: 2026-11-17
 
-**Status**: Draft
+**Status**: Approved
 
 **Input**: Roadmap stage 1 ([roadmap](../../docs/roadmap/roadmap.md)): every part of the system exists, builds, runs and is tested in continuous integration, with no product features yet.
+
+## Clarifications
+
+### Session 2026-11-23
+
+- Q: Must the remote configuration operation (`GET /v1/config`) work without signing in? → A: Yes, permanently public: the operation has no authentication requirement and no `401` response; the API contract is changed in this feature.
+- Q: Must the structured log format and log scrubbing (coordinates, tokens, e-mail addresses, invitation codes) with tests already exist in this feature? → A: Yes, in the core service, the delivery service and the app.
+- Q: When does a service count as ready on its health check? → A: One health operation per service (as in the API contract). The core service answers "ok" only while the database is reachable and all migrations are applied, otherwise "down" with a not-ready status code; the delivery service answers "ok" as soon as its process runs. Separate liveness and readiness addresses can be added later without a breaking change.
+- Q: Which point does the map show by default without location permission, and where is it defined? → A: A constant in the app: the centre of Kyiv (Maidan Nezalezhnosti) at city-level zoom; no contract change.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -93,8 +102,8 @@ When something does not work, the developer runs the environment check and gets 
 
 ### Functional Requirements
 
-- **FR-001**: The repository MUST contain the server services described in the [architecture overview](../../docs/architecture/overview.md) as runnable placeholders: a core service and a delivery service, each with a liveness and readiness health check that contains no data.
-- **FR-002**: The core service MUST serve the remote configuration operation exactly as defined in the API contract (`api/openapi.yaml`), with built-in defaults for the map style address and the location-engine parameters.
+- **FR-001**: The repository MUST contain the server services described in the [architecture overview](../../docs/architecture/overview.md) as runnable placeholders: a core service and a delivery service, each with one health check operation (as defined in the API contract) that contains no data beyond the status. The core service MUST report "ok" only while the database is reachable and all migrations are applied, and "down" with a not-ready status code otherwise; the delivery service has no dependencies in this feature and reports "ok" while its process runs.
+- **FR-002**: The core service MUST serve the remote configuration operation exactly as defined in the API contract (`api/openapi.yaml`), with built-in defaults for the map style address and the location-engine parameters. The operation MUST be available without signing in (the app needs it before an account exists, for example for the legal page links during onboarding); the API contract MUST declare it without an authentication requirement and without an "unauthorized" response.
 - **FR-003**: Responses of the core service MUST be validated against the API contract in automated tests.
 - **FR-004**: The database MUST be built from the project's own image definition that works on both the developer PC architecture and the production server architecture, and MUST include the geographic extension.
 - **FR-005**: Database schema changes MUST be applied by versioned migrations, run automatically when the local stack starts.
@@ -112,11 +121,12 @@ When something does not work, the developer runs the environment check and gets 
 - **FR-017**: The contract check MUST lint the API contract and fail on breaking changes compared with `main`.
 - **FR-018**: Memory use of every service of the running stack MUST be measured once and recorded as the baseline for NFR-SRV-06.
 - **FR-019**: The app MUST NOT request any location, notification or background permission in this feature.
+- **FR-020**: The core service, the delivery service and the app MUST write structured logs (one machine-readable record per event) through a shared scrubbing step that removes or masks coordinates, place names, tokens, e-mail addresses and invitation codes before a record is written. Each of the three MUST have automated tests that log records containing every forbidden kind of value and verify that none of them appears in the output.
 
 ### Key Entities
 
 - **Remote configuration**: a versioned set of values the server gives to apps: map style address and location-engine parameter defaults. In this feature only built-in defaults exist; editing comes with the back office.
-- **Health status**: per service, "alive" and "ready" with no other data.
+- **Health status**: per service, one status value ("ok", "degraded" or "down") with no other data; "ok" means the service is ready to serve requests.
 
 ## Success Criteria *(mandatory)*
 
@@ -136,4 +146,4 @@ When something does not work, the developer runs the environment check and gets 
 - The production server, back office, accounts and push are out of scope; the remote configuration has no editor yet.
 - The map style provider is the one chosen in [ADR-018](../../docs/architecture/adr/ADR-018-maps-maplibre-openfreemap.md); this feature only confirms it.
 - The repository is public, so continuous integration has no minute limits that affect this feature.
-- "Current area" on the map means the area around a fixed default point (no location permission in this feature); the developer can pan to any place.
+- "Current area" on the map means the area around a fixed default point defined as a constant in the app: the centre of Kyiv (Maidan Nezalezhnosti) at city-level zoom (no location permission in this feature, no personal place in the public repository); the developer can pan to any place, including the home city for SC-004.

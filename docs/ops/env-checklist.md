@@ -17,7 +17,7 @@ Run after setting up a PC and whenever something "suddenly stopped working". `sc
 | 8 | Docker memory | `docker info --format '{{.MemTotal}}'` | ≥ 4 GB | auto |
 | 9 | Host ports free or used by Locator | `Get-NetTCPConnection -LocalPort 8080,15432 -State Listen` | Nothing, or the Locator containers | auto |
 | 10 | `infra/.env` exists and has every name from `.env.example` | Script compares the two files | No missing names | auto |
-| 11 | Stack healthy | `.\scripts\up.ps1`, then `Invoke-WebRequest http://localhost:8080/health` | `200` | auto |
+| 11 | Stack healthy | `Invoke-WebRequest http://localhost:8080/health` (start the stack with `.\scripts\up.ps1` first; `doctor.ps1` only reports) | `200`; `WARN` "stack not running" when no Locator container runs | auto |
 | 12 | Emulator reaches the backend | In the emulator browser open `http://10.0.2.2:8080/health` | `ok` | manual |
 | 13 | Phone listed | `adb devices` | Each phone shows `device` | auto (warn if none) |
 | 14 | Phone reaches the backend | `adb reverse tcp:8080 tcp:8080`, open `http://localhost:8080/health` in the phone browser | `ok` | manual |

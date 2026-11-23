@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-17
 
-**Status**: Approved
+**Status**: In progress
 
 **Input**: Roadmap stage 1 ([roadmap](../../docs/roadmap/roadmap.md)): every part of the system exists, builds, runs and is tested in continuous integration, with no product features yet.
 

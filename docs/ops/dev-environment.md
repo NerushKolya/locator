@@ -82,13 +82,17 @@ Copy-Item infra\.env.example infra\.env    # then fill in local values
 
 Open the `android/` folder in Android Studio and run the `internalDebug` variant.
 
-### 3.1. Ports
+### 3.1. Ports and `infra/.env`
 
-The local stack publishes one HTTP port on the host, `8080` by default (`LOCATOR_HTTP_PORT` in `infra/.env`), and the database on `15432` for desktop database tools. If a port is taken by another program, change **only** the Locator port in `infra/.env`:
+`infra/.env` is created from `infra/.env.example` (the example lists every name; secret values are empty and are filled in locally; the real file is never committed). `up.ps1` stops before starting anything if a name is missing or empty and names it.
+
+The local stack publishes one HTTP port on the host, `8080` by default (`LOCATOR_HTTP_PORT`), and the database on `15432` (`LOCATOR_DB_PORT`) for desktop database tools. Both are bound to `127.0.0.1` only. If a port is taken by another program, change **only** the Locator port in `infra/.env`; when you change the HTTP port, change the port in `LOCATOR_PUBLIC_BASE_URL` too. `up.ps1` and `doctor.ps1` check both ports first and name the owning process when one is taken (a port published by the Locator containers themselves is fine):
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
 ```
+
+`.\scripts\down.ps1` stops the stack and never removes the data volume.
 
 ### 3.2. Reaching the local backend
 

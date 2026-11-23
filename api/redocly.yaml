@@ -1,0 +1,11 @@
+extends:
+  - recommended
+
+# Every rule that is switched off or downgraded is listed here with the reason.
+rules:
+  # No license is chosen yet; the repository is private and has no public API consumers.
+  info-license: off
+  # The server list holds the local development address (localhost) and a placeholder host.
+  no-server-example.com: off
+  # Public, parameterless operations (/health, /v1/config) have no client error to document.
+  operation-4xx-response: off

@@ -29,7 +29,7 @@ The contract is changed first, then the code ([ADR-009](../architecture/adr/ADR-
 
 | Credential | Header | Lifetime | Used for |
 |---|---|---|---|
-| Access token | `Authorization: Bearer <jwt>` | 15 min | All `/v1` endpoints except `/v1/auth/*` (public) and `/v1/stream` |
+| Access token | `Authorization: Bearer <jwt>` | 15 min | All `/v1` endpoints except `/v1/auth/*`, `/v1/config` (public) and `/v1/stream` |
 | Refresh token | Request body of `/v1/auth/refresh` | 60 days sliding, rotated at every use | Getting a new token pair |
 | Stream ticket | `Authorization: Bearer <ticket>` | 60 s, single use | Opening `/v1/stream` |
 

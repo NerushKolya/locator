@@ -28,3 +28,8 @@ node_modules/
 vendor/
 dist/
 coverage/
+
+# Stage 1 additions
+backend/core/var/
+android/.kotlin/
+build/test-results/

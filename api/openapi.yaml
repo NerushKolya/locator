@@ -55,7 +55,11 @@ paths:
     get:
       tags: [Service]
       operationId: getHealth
-      summary: Liveness and readiness probe
+      summary: Readiness probe
+      description: |
+        `ok` (200) means the service is ready to serve requests: for the core,
+        the database is reachable and all migrations are applied. Otherwise
+        `down` (503). The body contains the status only.
       security: []
       responses:
         '200':
@@ -78,9 +82,12 @@ paths:
       summary: Remote configuration for the app and the location engine
       description: |
         Versioned configuration published by the operator: engine parameters,
-        map style URL, limits and legal page URLs. The app caches it and
-        refetches when a report response announces a newer `configVersion`.
-        Supports conditional requests with `If-None-Match`.
+        map style URL, limits and legal page URLs. Public: the app reads it
+        before an account exists (for example for the legal links during
+        onboarding). The app caches it and refetches when a report response
+        announces a newer `configVersion`. Supports conditional requests with
+        `If-None-Match`.
+      security: []
       parameters:
         - name: If-None-Match
           in: header
@@ -97,7 +104,6 @@ paths:
                 $ref: '#/components/schemas/RemoteConfig'
         '304':
           description: Not modified.
-        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /v1/auth/nonce:
     post:

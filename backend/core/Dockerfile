@@ -60,4 +60,9 @@ RUN composer dump-autoload --no-interaction --classmap-authoritative --no-dev \
     && env APP_SECRET=build-time-only SERVICE_NAME=core LOG_LEVEL=info DB_HOST=build DB_PORT=5432 DB_NAME=build CORE_APP_PASSWORD=build CORE_MIGRATOR_PASSWORD=build LOCATOR_PUBLIC_BASE_URL=http://localhost OPERATOR_MODE=off \
        php bin/console cache:warmup --no-interaction \
     && mkdir -p var/share
+# Run as an unprivileged user: port 8080 needs no capability, and only var/ (cache, logs) and the Caddy state directories are writable.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin locator \
+    && mkdir -p /data/caddy /config/caddy \
+    && chown -R locator:locator /app/var /data/caddy /config/caddy
+USER locator
 EXPOSE 8080

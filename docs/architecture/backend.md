@@ -193,6 +193,7 @@ Product defaults that must change without a deployment (engine parameters, map s
 - One error format for all services: `application/problem+json` (RFC 9457) with a stable machine-readable `code` and a `requestId`. Codes are listed in the [API guide](../api/README.md).
 - Domain errors are typed exceptions mapped to problems in one place. Unknown exceptions become `500 internal_error` without details.
 - Authorization failures for other people's data return `404` (not `403`) when revealing existence would leak membership.
+- Every service runs as an unprivileged user (`core` as uid 10001, `delivery` on the distroless `nonroot` image). Unknown routes in `delivery` answer `404 not_found` as `application/problem+json` with `type` `about:blank` until the service is published to clients (stage 4b).
 - Validation errors list offending fields in `errors[]`.
 
 ## 10. Logging and observability

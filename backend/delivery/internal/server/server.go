@@ -17,6 +17,7 @@ import (
 func NewHandler(logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	health.Register(mux)
+	mux.HandleFunc(catchAll, notFound)
 	return requestid.Middleware(requestLog(logger, mux))
 }
 
@@ -55,7 +56,7 @@ func requestLog(logger *slog.Logger, mux *http.ServeMux) http.Handler {
 
 		// ServeMux stores the matched pattern ("GET /health") in the request it was given.
 		_, route, _ := strings.Cut(r.Pattern, " ")
-		if r.Pattern == "" {
+		if r.Pattern == "" || r.Pattern == catchAll {
 			route = "unmatched"
 		} else if route == "" {
 			route = r.Pattern

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -90,5 +91,42 @@ func TestUnknownPathIsLoggedWithoutRawPath(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "secret-id") {
 		t.Errorf("raw path written to the log: %s", buf.String())
+	}
+}
+
+func TestUnknownPathAnswersProblemJSON(t *testing.T) {
+	handler := NewHandler(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/groups/secret-id"},
+		{http.MethodPost, "/health"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("X-Request-Id", "req-12345678")
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s: status %d, want 404", tc.method, tc.path, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
+			t.Errorf("%s %s: Content-Type %q", tc.method, tc.path, ct)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s %s: body is not JSON: %v", tc.method, tc.path, err)
+		}
+		want := map[string]any{
+			"type": "about:blank", "title": "Not Found", "status": float64(404),
+			"code": "not_found", "requestId": "req-12345678",
+		}
+		for k, v := range want {
+			if body[k] != v {
+				t.Errorf("%s %s: body[%q] = %v, want %v", tc.method, tc.path, k, body[k], v)
+			}
+		}
+		if strings.Contains(rec.Body.String(), "secret-id") {
+			t.Errorf("request path echoed in the body: %s", rec.Body.String())
+		}
 	}
 }

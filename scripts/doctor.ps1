@@ -24,8 +24,8 @@ function Test-Command {
 }
 
 # Minimum Docker Compose version for "up --wait --wait-timeout".
-# Not verified in official release notes: the flag is documented in the CLI reference; 2.20.0 is a conservative choice.
-$minCompose = [version]'2.20.0'
+# `--wait-timeout` was added to "docker compose up" in v2.17.0 (release notes: https://github.com/docker/compose/releases/tag/v2.17.0).
+$minCompose = [version]'2.17.0'
 
 # 1. Git and local identity
 if (-not (Test-Command 'git')) {

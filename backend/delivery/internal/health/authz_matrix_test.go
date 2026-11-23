@@ -28,6 +28,8 @@ func TestAuthzMatrix(t *testing.T) {
 		want                 int
 	}{
 		{http.MethodGet, "/health", "anonymous", http.StatusOK},
+		{http.MethodGet, "/v1/stream", "anonymous", http.StatusNotFound},
+		{http.MethodPost, "/health", "anonymous", http.StatusNotFound},
 	}
 
 	callers := map[string]func(*http.Request){

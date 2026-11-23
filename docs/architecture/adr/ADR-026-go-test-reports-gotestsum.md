@@ -1,6 +1,6 @@
 # ADR-026: Go test reports — gotestsum in the `delivery` test image
 
-- Status: Proposed
+- Status: Accepted (by the owner, 2026-11-23)
 - Date: 2026-11-23
 
 ## Context

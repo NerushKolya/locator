@@ -52,6 +52,7 @@ flowchart TB
 | Module | Contents |
 |---|---|
 | `app` | Application class, single activity, navigation host, Hilt wiring, flavors, manifest (service, receivers), notification channels |
+| `core:common` | Pure Kotlin used by every module and depending on nothing: `Logger` (one JSON record per line), the scrubbing rules of the log-records contract, the `LogSink` interface (the Android sink lives in `app`) |
 | `core:model` | Domain types shared by all modules; names follow the product glossary (`LocationPoint`, `EngineMode`, `Freshness`, `SharingState`, …). Pure Kotlin |
 | `core:network` | Ktor client, authentication plugin (token refresh), contract DTOs, problem-details mapping, SSE client |
 | `core:database` | Room database: `PointBuffer`, cached groups/members/places, engine journal |
@@ -74,6 +75,8 @@ Dependency rules: features do not depend on each other; `core:*` never depends o
 | | `store` | Google Play: compiled **without** `feature:operator`; no code path can start sharing from a server command; fixed server URL |
 
 The app reports its distribution to the server at sign-in; the server refuses operator actions for `store` devices. A build check verifies that the `store` artifact contains no operator classes ([ADR-016](adr/ADR-016-operator-capabilities-flavor-and-switch.md)).
+
+**Server address per flavor and device.** `store` uses one fixed address (`BuildConfig.SERVER_URL`, a placeholder until production) and has no code path that changes it. `internal` takes the port from the Gradle property `locator.serverPort` (default `8080`; `install-phone.ps1` passes `LOCATOR_HTTP_PORT` from `infra/.env`) and chooses the host at run time from build properties: an emulator uses `http://10.0.2.2:<port>`, a phone uses `http://localhost:<port>` through `adb reverse`. Clear-text HTTP is allowed only in `debug` builds and only for `localhost`, `127.0.0.1` and `10.0.2.2`. The store check is the Gradle task `verifyStoreArtifact` (no `internal` classes in the R8 mapping of `storeRelease`; no location, notification or foreground-service permission in any merged manifest).
 
 ## 4. Layers and state
 
@@ -220,7 +223,7 @@ Notification channels: `sharing` (persistent, low importance), `requests`, `sos`
 - Events are applied only if newer than what the screen already has (position time for positions, event id for the rest). A `resync` event triggers a snapshot reload; a `reconnect` event triggers a new ticket.
 - Markers show the accuracy circle; a position with accuracy worse than 200 m is drawn as a circle without a pin. The map never interpolates between points.
 - Opening the map as a sharing viewer makes `delivery` report presence, which the core turns into active-view leases for the group's members.
-- The MapLibre integration with Compose (community wrapper or `AndroidView`) is chosen on the walking-skeleton prototype, together with a visual check of map quality for Ukraine.
+- The map is drawn with MapLibre Compose 0.20.0 (decided on the walking-skeleton prototype, see [ADR-018](adr/ADR-018-maps-maplibre-openfreemap.md)): `MaplibreMap` with `rememberMapState(baseStyle = BaseStyle.Uri(styleUrl))`; attribution and logo stay at their default places; a style-load failure is reported to the view model, which shows the placeholder. The app declares the OpenGL runtime artifact next to the library. The visual check of map quality for Ukraine is done by the owner in the stage 1 demo.
 
 ## 8. Local data and security
 

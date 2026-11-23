@@ -2,8 +2,8 @@
 # Path filtering is done per job (`if:` on the outputs of `changes`), not with workflow-level `paths`, so a job
 # skipped because its paths did not change reports as skipped and does not block merging when it is required.
 #
-# Built up in steps: this version has changes, contract, core, delivery, authz-matrix, workflows and
-# secrets; `android` is added with the Android project.
+# Jobs: changes, contract, core, delivery, authz-matrix, android, workflows and
+# secrets.
 name: ci
 
 on:
@@ -157,6 +157,40 @@ jobs:
         with:
           name: test-results-authz-matrix
           path: build/test-results/backend
+          if-no-files-found: ignore
+          retention-days: 7
+
+  android:
+    name: android
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      # Cache is read-only on pull requests and written only on pushes to main.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Android checks
+        shell: pwsh
+        run: ./scripts/test-android.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: android-reports
+          path: |
+            android/**/build/reports/
+            android/**/build/test-results/
+            android/app/build/outputs/apk/internal/debug/*.apk
           if-no-files-found: ignore
           retention-days: 7
 

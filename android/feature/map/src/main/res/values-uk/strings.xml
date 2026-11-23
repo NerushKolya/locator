@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_status_checking">Перевіряємо сервер…</string>
+    <string name="map_status_reachable">Сервер доступний</string>
+    <string name="map_status_not_ready">Сервер не готовий</string>
+    <string name="map_status_unreachable">Сервер недоступний</string>
+    <string name="map_reason_timeout">Немає відповіді вчасно</string>
+    <string name="map_reason_connection_refused">З’єднання відхилено</string>
+    <string name="map_reason_unexpected_response">Неочікувана відповідь</string>
+    <string name="map_server_status_detail">Стан: %1$s</string>
+    <string name="map_address">Адреса: %1$s</string>
+    <string name="map_refresh">Оновити</string>
+    <string name="map_unavailable">Карта недоступна</string>
+    <string name="map_unavailable_hint">Не вдалося завантажити стиль карти. Перевірте сервер і оновіть.</string>
+    <string name="map_loading">Завантажуємо карту…</string>
+    <string name="map_placeholder">Карта</string>
+</resources>

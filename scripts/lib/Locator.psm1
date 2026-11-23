@@ -192,5 +192,53 @@ function Test-PortUsable {
     if ($null -ne $Owner) { $Owner.Value = $found }
     return $false
 }
+function Initialize-AndroidEnvironment {
+    <#
+      Sets JAVA_HOME (Android Studio runtime, unless already set) and ANDROID_HOME (default SDK location)
+      for this process only, so that Gradle and adb work without changing machine settings.
+    #>
+    if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        $jbr = Join-Path $env:ProgramFiles 'Android\Android Studio\jbr'
+        if (Test-Path -LiteralPath $jbr) {
+            $env:JAVA_HOME = $jbr
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($env:ANDROID_HOME)) {
+        $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+        if (Test-Path -LiteralPath $sdk) {
+            $env:ANDROID_HOME = $sdk
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        throw 'JAVA_HOME is not set and Android Studio runtime was not found. Install Android Studio or set JAVA_HOME to a JDK 17 or newer.'
+    }
+    if ([string]::IsNullOrWhiteSpace($env:ANDROID_HOME)) {
+        throw 'ANDROID_HOME is not set and the default SDK location was not found. Install the Android SDK with Android Studio.'
+    }
+}
 
-Export-ModuleMember -Function Get-RepoRoot, Test-IsWindowsHost, Read-DotEnv, Invoke-Native, Invoke-NativeExitCode, Write-CheckLine, Get-ComposeArgs, New-ThrowAwayEnvFile, Get-MissingEnvNames, Get-LocatorPublishedPorts, Get-PortOwner, Test-PortUsable
+function Get-AdbPath {
+    <# Full path of adb: from PATH, else from the SDK platform-tools. #>
+    $cmd = Get-Command adb -ErrorAction SilentlyContinue
+    if ($null -ne $cmd) { return $cmd.Source }
+    Initialize-AndroidEnvironment
+    $path = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw 'adb was not found. Add Android SDK platform-tools to PATH.'
+    }
+    return $path
+}
+
+function Get-AdbDevices {
+    <# Serial numbers of devices in state "device" (not "offline" or "unauthorized"). #>
+    param([Parameter(Mandatory = $true)][string]$Adb)
+    $ErrorActionPreference = 'Continue'
+    $lines = & $Adb devices 2>&1 | ForEach-Object { [string]$_ }
+    $serials = @()
+    foreach ($line in $lines) {
+        if ($line -match '^(\S+)\s+device\s*$') { $serials += $Matches[1] }
+    }
+    return $serials
+}
+
+Export-ModuleMember -Function Get-RepoRoot, Test-IsWindowsHost, Read-DotEnv, Invoke-Native, Invoke-NativeExitCode, Write-CheckLine, Get-ComposeArgs, New-ThrowAwayEnvFile, Get-MissingEnvNames, Get-LocatorPublishedPorts, Get-PortOwner, Test-PortUsable, Initialize-AndroidEnvironment, Get-AdbPath, Get-AdbDevices

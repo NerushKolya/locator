@@ -252,7 +252,7 @@ The SVGs are converted to Android vector drawables (Android Studio *Image Asset*
 
 ## 9. Theme code
 
-[`theme/`](theme/) holds `Color.kt`, `Theme.kt` and `Type.kt` in the structure of the Material Theme Builder Compose export, with light and dark schemes and no contrast variants. The files are moved into `core:designsystem` when the Android project is created (walking skeleton) and the package `core.designsystem.theme` is replaced with the real one. `AppTheme` does not use dynamic colour. Medium and high contrast schemes are added if the product needs them (they are not in the requirements).
+[`theme/`](theme/) holds `Color.kt`, `Theme.kt` and `Type.kt` in the structure of the Material Theme Builder Compose export, with light and dark schemes and no contrast variants. The files were copied into `android/core/designsystem/` in the walking skeleton with the package `io.github.nerushkolya.locator.core.designsystem.theme`; the copies there are the ones the app uses. `AppTheme` does not use dynamic colour. Medium and high contrast schemes are added if the product needs them (they are not in the requirements).
 
 ## 10. Mockup index
 

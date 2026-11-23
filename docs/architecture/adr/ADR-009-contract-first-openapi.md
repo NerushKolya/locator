@@ -31,3 +31,4 @@ Contract-first with OpenAPI 3.1 in `api/openapi.yaml`.
 - Clients and server can be developed and tested independently against the same file.
 - Extra discipline: the contract must be updated in the same change as the code.
 - Generator limits are discovered early, in the walking skeleton, not during feature work.
+- Generator trial, walking skeleton (OpenAPI Generator 7.27.0, `kotlin` client, `jvm-ktor` library, kotlinx.serialization, run outside the build): the whole OpenAPI 3.1 contract is parsed, but the output is 164 files and about 9,500 lines, and the free-form `engine` object of `RemoteConfig` becomes `Map<String, Any>`, which kotlinx.serialization cannot encode. **Decision: do not adopt now**; the app keeps hand-written DTOs checked by contract-shaped tests. Revisit at stage 3, when the number of operations makes hand-written DTOs costly.

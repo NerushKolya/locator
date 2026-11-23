@@ -84,6 +84,16 @@ Copy-Item infra\.env.example infra\.env    # then fill in local values
 
 Open the `android/` folder in Android Studio and run the `internalDebug` variant.
 
+Install on every connected phone and emulator (builds `internalDebug` for the port in `infra/.env`, installs, sets `adb reverse` for phones, starts the app), and read the app's log records:
+
+```powershell
+.\scripts\install-phone.ps1      # -Serial <id> for one device, -ReverseOnly after re-plugging a phone
+.\scripts\logcat.ps1             # JSON records of the app; -Clear empties the buffer first
+.\scripts\test-android.ps1       # unit and screenshot tests, lint, store-build check
+```
+
+The scripts set `JAVA_HOME` (Android Studio runtime) and `ANDROID_HOME` for their own process when the variables are not set.
+
 ### 3.1. Ports and `infra/.env`
 
 `infra/.env` is created from `infra/.env.example` (the example lists every name; secret values are empty and are filled in locally; the real file is never committed). `up.ps1` stops before starting anything if a name is missing or empty and names it.

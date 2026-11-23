@@ -28,7 +28,7 @@ Work is done one group per session; each group ends with green tests and a commi
 | Infrastructure | T001–T010, T056–T057 | Database image, Compose base, `up`/`down`, `doctor` |
 | Backend | T011–T033 | `core`, `delivery`, backend and contract test commands |
 | Android | T034–T051 | App on phone and emulator, Android test, install and log commands |
-| CI | T052–T055 | `ci.yml`, Dependabot, required checks |
+| CI | T052–T055 | `ci.yml` (built up in steps, see the CI phase), Dependabot, required checks |
 | Finish and demo | T058–T061 | Quickstart run, demo, memory baseline, map decision |
 
 ---
@@ -165,6 +165,8 @@ Work is done one group per session; each group ends with green tests and a commi
 
 **Goal**: Pull requests and pushes to `main` run only the checks for changed paths plus the secret scan, each through the same script as locally; failing required checks block merging.
 
+**Staged delivery**: `ci.yml` (T052) is not written in one go at the end. Its first version is created right after T027 (jobs `changes`, `contract`, `core`, `authz-matrix`, `workflows`, `secrets`; `core` and `authz-matrix` call the scripts that exist by then), the `delivery` job is added after T033, the `android` job after T051. Each step is a separate commit and keeps the Acceptance note of T052. T053–T055 stay in this group; T054 and T055 need the first workflow to exist, so the feature pull request may be opened as a draft as soon as the first version is pushed.
+
 **Independent Test**: Quickstart §9: a contract-only pull request runs only `contract`, `authz-matrix` and `secrets`; a deliberately breaking contract change fails `contract` and names the change; total time under 15 minutes.
 
 - [ ] T052 [US3] Create `.github/workflows/ci.yml` per [research R-15](research.md#r-15-continuous-integration-fr-015-fr-016) and `docs/ops/ci.md`: triggers `pull_request` and `push` to `main`; `permissions: {}` at workflow level, per-job `contents: read`; `concurrency` per ref with `cancel-in-progress`; job `changes` with a path-filter action pinned by full commit SHA (paths: `android` — `android/**`, `api/openapi.yaml`, `scripts/test-android.ps1`; `core` — `backend/core/**`, `infra/**`, `scripts/test-backend.ps1`, `scripts/lib/**`; `delivery` — `backend/delivery/**`, `infra/**`, `scripts/test-backend.ps1`, `scripts/lib/**`; `contract` — `api/**`, `scripts/test-contract.ps1`; `authz-matrix` — `backend/core/**`, `backend/delivery/**`, `api/**`; `workflows` — `.github/**`); every job filtered with `if:` on the outputs of `changes` (not workflow-level `paths`, so a skipped required job does not block merging); jobs `android` (JDK 21, Gradle setup action with cache read-only on pull requests, `pwsh scripts/test-android.ps1`), `core` / `delivery` (`pwsh scripts/test-backend.ps1 -Service <name>`), `authz-matrix` (`pwsh scripts/test-backend.ps1 -AuthzMatrix`, both services), `contract` (`fetch-depth: 0`, `pwsh scripts/test-contract.ps1`, base = `github.event.before` on push), `workflows` (zizmor), `secrets` (gitleaks Docker image pinned by digest, always); test reports and APKs uploaded as artifacts with `retention-days: 7`; every third-party action pinned by SHA with the version in a comment. **Acceptance**: quickstart §9 (verified in T054)
@@ -270,7 +272,7 @@ Task: "T039 core:model types"
 1. Infrastructure group: T001–T010, then US4 (T056–T057)
 2. Backend group: T011–T034 → US1 complete
 3. Android group: T035–T051 → US2 complete
-4. CI group: T052–T055 → US3 complete, `main` protected
+4. CI group: first `ci.yml` version right after T027, `delivery` job after T033, `android` job after T051 (all T052); then T053–T055 → US3 complete, `main` protected
 5. Finish and demo: T058–T061 → stage 1 Definition of Done
 
 ---

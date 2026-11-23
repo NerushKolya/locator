@@ -1,0 +1,12 @@
+# Secret scanning (CI job "secrets"): default rules plus an allowlist for the documented fake values below.
+title = "Locator"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake JWT-like examples used as scrubbing test vectors and as API examples; they carry no secret."
+regexes = [
+  '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxIn0\.c2lnbmF0dXJl''',
+  '''eyJhbGciOiJSUzI1NiIs\.\.\.''',
+]

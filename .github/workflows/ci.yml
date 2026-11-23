@@ -1,0 +1,175 @@
+# Continuous integration (docs/ops/ci.md). Every job calls the same developer script that runs locally.
+# Path filtering is done per job (`if:` on the outputs of `changes`), not with workflow-level `paths`, so a job
+# skipped because its paths did not change reports as skipped and does not block merging when it is required.
+#
+# Built up in steps: this version has changes, contract, core, authz-matrix, workflows and secrets;
+# `delivery` is added with the delivery service tests, `android` with the Android project.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+      core: ${{ steps.filter.outputs.core }}
+      delivery: ${{ steps.filter.outputs.delivery }}
+      contract: ${{ steps.filter.outputs.contract }}
+      authz-matrix: ${{ steps.filter.outputs.authz-matrix }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            android:
+              - 'android/**'
+              - 'api/openapi.yaml'
+              - 'scripts/test-android.ps1'
+            core:
+              - 'backend/core/**'
+              - 'infra/**'
+              - 'scripts/test-backend.ps1'
+              - 'scripts/lib/**'
+            delivery:
+              - 'backend/delivery/**'
+              - 'infra/**'
+              - 'scripts/test-backend.ps1'
+              - 'scripts/lib/**'
+            contract:
+              - 'api/**'
+              - 'scripts/test-contract.ps1'
+            authz-matrix:
+              - 'backend/core/**'
+              - 'backend/delivery/**'
+              - 'api/**'
+            workflows:
+              - '.github/**'
+
+  contract:
+    name: contract
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      PUSH_BEFORE: ${{ github.event.before }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Pull request: the script compares with the merge base with origin/main.
+      # Push to main: it compares with the commit before the push.
+      - name: Contract lint and breaking changes
+        shell: pwsh
+        run: |
+          if ($env:EVENT_NAME -eq 'push') {
+            ./scripts/test-contract.ps1 -Base $env:PUSH_BEFORE
+          } else {
+            ./scripts/test-contract.ps1
+          }
+
+  core:
+    name: core
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Core tests
+        shell: pwsh
+        run: ./scripts/test-backend.ps1 -Service core
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results-core
+          path: build/test-results/backend/core
+          if-no-files-found: ignore
+          retention-days: 7
+
+  authz-matrix:
+    name: authz-matrix
+    needs: changes
+    if: needs.changes.outputs.authz-matrix == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Authorization matrix of every service
+        shell: pwsh
+        run: ./scripts/test-backend.ps1 -AuthzMatrix
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results-authz-matrix
+          path: build/test-results/backend
+          if-no-files-found: ignore
+          retention-days: 7
+
+  workflows:
+    name: workflows
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # zizmor 1.33.1; offline, so no token is needed.
+      - name: Lint workflows (zizmor)
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo:ro" -w /repo
+          ghcr.io/zizmorcore/zizmor@sha256:ecd3ffe6158de1322e05a044ed43749bee12b1dccb7e1a7859bc6ac4b2a1c516
+          --offline .github/
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # gitleaks 8.30.1 over the whole history; findings are printed redacted.
+      - name: Scan for secrets (gitleaks)
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo:ro"
+          ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --redact --no-banner

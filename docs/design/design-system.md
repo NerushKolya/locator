@@ -13,7 +13,7 @@ The mockups use Ukrainian copy (the primary UI language, US-110). This document 
 
 | | Decision |
 |---|---|
-| Working name | **Vohnyk** (Ukrainian "little light"); fallback name **Nytka**. The `applicationId` is chosen in the walking skeleton and does not have to match the name. A Google Play search for the name is still to be done by the owner before release |
+| Working name | **Loomi** (from "lumi", light; written in Latin letters in every app language). The `applicationId` is `io.github.nerushkolya.locator` (chosen in the walking skeleton, independent of the brand name). A Google Play search for the name is still to be done by the owner before release |
 | Idea | "A light in the window": your people are in place and all is well. No eye, crosshair or radar symbols (no surveillance imagery) |
 | Tone | Warm in words, exact in facts: calm and kind, but every status, age and reason is concrete ("until 18:00", "reason: power saving") |
 | Address | Formal "you" in Ukrainian (Ukrainian second-person plural) |

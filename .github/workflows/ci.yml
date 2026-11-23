@@ -2,8 +2,8 @@
 # Path filtering is done per job (`if:` on the outputs of `changes`), not with workflow-level `paths`, so a job
 # skipped because its paths did not change reports as skipped and does not block merging when it is required.
 #
-# Built up in steps: this version has changes, contract, core, authz-matrix, workflows and secrets;
-# `delivery` is added with the delivery service tests, `android` with the Android project.
+# Built up in steps: this version has changes, contract, core, delivery, authz-matrix, workflows and
+# secrets; `android` is added with the Android project.
 name: ci
 
 on:
@@ -111,6 +111,29 @@ jobs:
         with:
           name: test-results-core
           path: build/test-results/backend/core
+          if-no-files-found: ignore
+          retention-days: 7
+
+  delivery:
+    name: delivery
+    needs: changes
+    if: needs.changes.outputs.delivery == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Delivery tests
+        shell: pwsh
+        run: ./scripts/test-backend.ps1 -Service delivery
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results-delivery
+          path: build/test-results/backend/delivery
           if-no-files-found: ignore
           retention-days: 7
 

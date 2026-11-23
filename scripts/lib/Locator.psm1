@@ -56,11 +56,26 @@ function Invoke-Native {
         [Parameter(Mandatory = $true)][string]$Command,
         [string[]]$Arguments = @()
     )
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) {
+    $code = Invoke-NativeExitCode -Command $Command -Arguments $Arguments
+    if ($code -ne 0) {
         $line = (@($Command) + $Arguments) -join ' '
-        throw "Command failed with exit code ${LASTEXITCODE}: $line"
+        throw "Command failed with exit code ${code}: $line"
     }
+}
+
+function Invoke-NativeExitCode {
+    <#
+      Runs a native command and returns its exit code without throwing. Progress that tools such as
+      docker write to stderr must not stop the script: Windows PowerShell 5.1 turns stderr lines into
+      error records when output is redirected, so the preference is relaxed for this call only.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string[]]$Arguments = @()
+    )
+    $ErrorActionPreference = 'Continue'
+    & $Command @Arguments 2>&1 | ForEach-Object { Write-Host ([string]$_) }
+    return $LASTEXITCODE
 }
 
 function Write-CheckLine {
@@ -81,14 +96,39 @@ function Write-CheckLine {
 }
 
 function Get-ComposeArgs {
-    <# Common docker compose arguments: file, env file and fixed project name. #>
+    <# Common docker compose arguments: file, env file (default infra/.env) and fixed project name. #>
+    param([string]$EnvFile = '')
     $root = Get-RepoRoot
+    if ($EnvFile.Length -eq 0) {
+        $EnvFile = Join-Path $root 'infra\.env'
+    }
     return @(
         'compose',
         '-f', (Join-Path $root 'infra\docker-compose.yml'),
-        '--env-file', (Join-Path $root 'infra\.env'),
+        '--env-file', $EnvFile,
         '-p', 'locator'
     )
+}
+
+function New-ThrowAwayEnvFile {
+    <#
+      Writes a temporary env file with every name of infra/.env.example: example values where present,
+      a fixed throw-away value where the example is empty. Compose requires these names (":?") even
+      when only test profile services run, and CI has no infra/.env. Returns the file path.
+    #>
+    $root = Get-RepoRoot
+    $example = Read-DotEnv -Path (Join-Path $root 'infra\.env.example')
+    $lines = @()
+    foreach ($name in $example.Keys) {
+        $value = [string]$example[$name]
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            $value = 'throw-away-test-value'
+        }
+        $lines += "$name=$value"
+    }
+    $path = [System.IO.Path]::GetTempFileName()
+    [System.IO.File]::WriteAllLines($path, [string[]]$lines)
+    return $path
 }
 
 
@@ -153,4 +193,4 @@ function Test-PortUsable {
     return $false
 }
 
-Export-ModuleMember -Function Get-RepoRoot, Test-IsWindowsHost, Read-DotEnv, Invoke-Native, Write-CheckLine, Get-ComposeArgs, Get-MissingEnvNames, Get-LocatorPublishedPorts, Get-PortOwner, Test-PortUsable
+Export-ModuleMember -Function Get-RepoRoot, Test-IsWindowsHost, Read-DotEnv, Invoke-Native, Invoke-NativeExitCode, Write-CheckLine, Get-ComposeArgs, New-ThrowAwayEnvFile, Get-MissingEnvNames, Get-LocatorPublishedPorts, Get-PortOwner, Test-PortUsable

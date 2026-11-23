@@ -74,6 +74,24 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Real-time delivery service. No host port in this feature: nothing routes to it yet.
+  delivery:
+    build:
+      context: ../backend/delivery
+      target: runtime
+    image: locator-delivery:dev
+    environment:
+      DELIVERY_HTTP_ADDR: ":8081"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # The image has no shell: the binary requests its own /health.
+    healthcheck:
+      test: ["CMD", "/delivery", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
   # ---- test profile: throw-away database, never shares data with "postgres" ----
   postgres-test:
     profiles: ["test"]
@@ -120,6 +138,19 @@ services:
     depends_on:
       postgres-test:
         condition: service_healthy
+
+  # Runs the delivery tests (no database in this feature). GO_TEST_ARGS is set by scripts/test-backend.ps1.
+  delivery-test:
+    profiles: ["test"]
+    build:
+      context: ../backend/delivery
+      target: test
+    image: locator-delivery-test:dev
+    environment:
+      LOG_LEVEL: info
+      GO_TEST_ARGS: ${GO_TEST_ARGS:-./...}
+    volumes:
+      - ${DELIVERY_TEST_REPORTS_DIR:-../build/test-results/backend/delivery}:/reports
 
 volumes:
   pgdata:

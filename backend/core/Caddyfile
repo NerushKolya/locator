@@ -1,0 +1,14 @@
+# Serves only the PHP application (research R-06). TLS, /v1/stream routing and blocking of
+# /internal/** and /admin/** are added by the features that introduce those paths.
+{
+	frankenphp
+	auto_https off
+	admin off
+}
+
+:8080 {
+	root * /app/public
+	php_server {
+		file_server off
+	}
+}

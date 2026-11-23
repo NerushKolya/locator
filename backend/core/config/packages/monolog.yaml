@@ -1,0 +1,18 @@
+# JSON lines on stdout, one record per line (log-records contract). The processors
+# App\Platform\Logging\ScrubbingProcessor and App\Platform\Http\RequestIdProcessor are registered by
+# autoconfiguration (tag monolog.processor). The handler is a service (config/services.yaml) so that LOG_LEVEL
+# is read when the container starts, not frozen into the compiled container cache.
+monolog:
+    handlers:
+        main:
+            type: service
+            id: App\Platform\Logging\StdoutHandler
+            # The "request" channel logs every matched route with its full URL; the application writes its own request record.
+            channels: ["!request", "!event"]
+
+when@test:
+    monolog:
+        handlers:
+            main:
+                type: test
+                level: debug

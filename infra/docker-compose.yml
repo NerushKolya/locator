@@ -3,6 +3,19 @@
 
 name: locator
 
+# Settings shared by core and core-migrate. Only the names the core needs are passed (never POSTGRES_PASSWORD).
+x-core-env: &core-env
+  APP_SECRET: ${APP_SECRET:?set APP_SECRET in infra/.env}
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: locator
+  CORE_APP_PASSWORD: ${CORE_APP_PASSWORD:?set CORE_APP_PASSWORD in infra/.env}
+  CORE_MIGRATOR_PASSWORD: ${CORE_MIGRATOR_PASSWORD:?set CORE_MIGRATOR_PASSWORD in infra/.env}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  OPERATOR_MODE: ${OPERATOR_MODE:-off}
+  LOCATOR_PUBLIC_BASE_URL: ${LOCATOR_PUBLIC_BASE_URL:?set LOCATOR_PUBLIC_BASE_URL in infra/.env}
+  SERVICE_NAME: core
+
 services:
   postgres:
     build:
@@ -20,6 +33,41 @@ services:
       - "127.0.0.1:${LOCATOR_DB_PORT:-15432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d locator"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # Applies pending migrations as role core_migrator, then exits. "core" starts only after it succeeded.
+  core-migrate:
+    build:
+      context: ../backend/core
+      target: runtime
+    image: locator-core:dev
+    command: ["php", "bin/console", "doctrine:migrations:migrate", "--no-interaction", "--allow-no-migration"]
+    environment:
+      <<: *core-env
+      SERVICE_NAME: core-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  core:
+    build:
+      context: ../backend/core
+      target: runtime
+    image: locator-core:dev
+    environment:
+      <<: *core-env
+    ports:
+      - "127.0.0.1:${LOCATOR_HTTP_PORT:-8080}:8080"
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/health') === false ? 1 : 0);"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -46,6 +94,32 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
+
+  # Runs migrations on postgres-test, then PHPUnit. The report directory is a bind mount set by scripts/test-backend.ps1.
+  core-test:
+    profiles: ["test"]
+    build:
+      context: ../backend/core
+      target: test
+    image: locator-core-test:dev
+    environment:
+      APP_SECRET: test-secret-not-for-production
+      DB_HOST: postgres-test
+      DB_PORT: "5432"
+      DB_NAME: locator
+      CORE_APP_PASSWORD: test-core-app
+      CORE_MIGRATOR_PASSWORD: test-migrator
+      LOG_LEVEL: info
+      OPERATOR_MODE: "off"
+      LOCATOR_PUBLIC_BASE_URL: http://localhost:8080
+      OPENAPI_CONTRACT_PATH: /contract/openapi.yaml
+      PHPUNIT_ARGS: ${PHPUNIT_ARGS:-}
+    volumes:
+      - ../api:/contract:ro
+      - ${TEST_REPORTS_DIR:-../build/test-results/backend/core}:/reports
+    depends_on:
+      postgres-test:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -1,0 +1,31 @@
+# Two connections to the same database (ADR-020, data model section 4):
+#   default    - role core_app: reads and writes data, no DDL
+#   migrations - role core_migrator: owns schema "core", runs migrations only
+# Passwords come from the environment; connection parameters are not URLs so that any password character works.
+doctrine:
+    dbal:
+        default_connection: default
+        connections:
+            default:
+                driver: pdo_pgsql
+                host: '%env(DB_HOST)%'
+                port: '%env(int:DB_PORT)%'
+                dbname: '%env(DB_NAME)%'
+                user: core_app
+                password: '%env(CORE_APP_PASSWORD)%'
+                server_version: '18'
+                charset: utf8
+                options:
+                    # PDO::ATTR_TIMEOUT: connect timeout in seconds. An unreachable database must not stall /health.
+                    # Measured: /health answers "down" after about 2 s for a host that drops packets (libpq rounds up),
+                    # within the 3 s timeout of the Compose health check.
+                    2: 1
+            migrations:
+                driver: pdo_pgsql
+                host: '%env(DB_HOST)%'
+                port: '%env(int:DB_PORT)%'
+                dbname: '%env(DB_NAME)%'
+                user: core_migrator
+                password: '%env(CORE_MIGRATOR_PASSWORD)%'
+                server_version: '18'
+                charset: utf8

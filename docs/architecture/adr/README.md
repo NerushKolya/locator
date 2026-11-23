@@ -42,6 +42,7 @@ An ADR records one significant decision: the problem, the options, the choice an
 | [ADR-023](ADR-023-error-tracking-sentry-with-scrubbing.md) | Error tracking: Sentry Developer plan with mandatory scrubbing, Bugsink as the exit | Accepted |
 | [ADR-024](ADR-024-test-database-compose-profile.md) | Test database: a `test` profile in Docker Compose instead of Testcontainers | Accepted |
 | [ADR-025](ADR-025-developer-commands-powershell-scripts.md) | Developer commands: PowerShell scripts shared by the developer PC and CI | Proposed |
+| [ADR-026](ADR-026-go-test-reports-gotestsum.md) | Go test reports: gotestsum in the `delivery` test image | Proposed |
 
 ADR-019 to ADR-025 record the operations and quality decisions; the procedures themselves are in [docs/ops](../../ops/) and [docs/quality](../../quality/).
 

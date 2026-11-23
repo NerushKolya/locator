@@ -80,11 +80,25 @@ Copy-Item infra\.env.example infra\.env    # then fill in local values
 .\scripts\up.ps1                            # starts the local stack and waits for /health
 ```
 
+`up.ps1` builds the images and starts the Compose project `locator`: `postgres` (PostgreSQL + PostGIS), `core-migrate` (applies pending migrations once, then exits), `core` (Symfony on FrankenPHP, the only service with an HTTP port on the host) and `delivery` (Go, no host port yet). It returns only when every service reports healthy, or fails after 180 s. `.\scripts\down.ps1` stops the stack.
+
 Open the `android/` folder in Android Studio and run the `internalDebug` variant.
 
 ### 3.1. Ports and `infra/.env`
 
 `infra/.env` is created from `infra/.env.example` (the example lists every name; secret values are empty and are filled in locally; the real file is never committed). `up.ps1` stops before starting anything if a name is missing or empty and names it.
+
+| Name | Meaning |
+|---|---|
+| `COMPOSE_PROJECT_NAME` | Always `locator` |
+| `LOCATOR_HTTP_PORT`, `LOCATOR_DB_PORT` | Host ports of `core` and `postgres` |
+| `LOCATOR_PUBLIC_BASE_URL` | Base of the legal page links in `/v1/config` and of problem `type` URIs; its port follows `LOCATOR_HTTP_PORT` |
+| `POSTGRES_PASSWORD`, `CORE_MIGRATOR_PASSWORD`, `CORE_APP_PASSWORD`, `DELIVERY_APP_PASSWORD` | Local passwords of the database superuser and the three service roles; any non-empty values |
+| `APP_SECRET` | Symfony secret; any long random string |
+| `LOG_LEVEL` | `debug`, `info`, `warning` or `error` for `core` and `delivery` |
+| `OPERATOR_MODE` | `off` (default) or `on` |
+
+The backend tests do not use `infra/.env` or the development database: `test-backend.ps1` runs the containers of the Compose `test` profile with a throw-away `postgres-test` (data in memory) and fixed test values, so it works the same on a fresh clone and in CI.
 
 The local stack publishes one HTTP port on the host, `8080` by default (`LOCATOR_HTTP_PORT`), and the database on `15432` (`LOCATOR_DB_PORT`) for desktop database tools. Both are bound to `127.0.0.1` only. If a port is taken by another program, change **only** the Locator port in `infra/.env`; when you change the HTTP port, change the port in `LOCATOR_PUBLIC_BASE_URL` too. `up.ps1` and `doctor.ps1` check both ports first and name the owning process when one is taken (a port published by the Locator containers themselves is fine):
 
@@ -109,8 +123,8 @@ If the host port was changed, use the same number in `adb reverse` and in the ap
 | Action | Command |
 |---|---|
 | Start / stop the stack | `.\scripts\up.ps1` / `.\scripts\down.ps1` |
-| Backend tests (unit + integration + authorization matrix) | `.\scripts\test-backend.ps1` |
-| Contract checks | `.\scripts\test-contract.ps1` |
+| Backend tests (unit + integration + authorization matrix) | `.\scripts\test-backend.ps1` (`-Service core\|delivery`, `-Unit` without a database, `-AuthzMatrix`); JUnit reports in `build/test-results/backend/` |
+| Contract checks (Redocly lint + oasdiff breaking changes against the merge base with `origin/main`) | `.\scripts\test-contract.ps1` (`-Base <revision>`) |
 | Backend end-to-end | `.\scripts\e2e-backend.ps1` |
 | Android unit, screenshot tests, lint | `.\scripts\test-android.ps1` |
 | Build and install on the connected phone | `.\scripts\install-phone.ps1` |

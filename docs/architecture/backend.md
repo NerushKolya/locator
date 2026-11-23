@@ -130,7 +130,11 @@ Retries use exponential back-off. Handlers are idempotent: processing the same m
 
 ```
 backend/delivery/
-  cmd/delivery/          entry point, configuration, graceful shutdown
+  cmd/delivery/          entry point, configuration, graceful shutdown, -healthcheck flag
+  internal/server/       HTTP handler assembly: routes, request id, request log records
+  internal/health/       GET /health, authorization matrix of the service
+  internal/logging/      JSON log records with scrubbing (log/slog handler)
+  internal/requestid/    X-Request-Id middleware
   internal/relay/        LISTEN, outbox reader, cursor
   internal/stream/       SSE handler, hub (groups → connections), replay buffer
   internal/ticket/       stream-ticket verification (public key only)
@@ -196,7 +200,7 @@ Product defaults that must change without a deployment (engine parameters, map s
 - Structured JSON logs to stdout in every service (Monolog, `log/slog`), with `requestId` propagated from the edge proxy through the core, the outbox event and `delivery`.
 - Log fields are allow-listed. Coordinates, place names, tokens, e-mail addresses and invitation codes are never logged above debug level; debug level is disabled in production.
 - Error tracking uses the Sentry protocol with a scrubbing filter in each SDK (tested).
-- `/health` on every service: liveness (process up) and readiness (database reachable, for `delivery` also the outbox listener). Health responses contain no data.
+- One `GET /health` per service, a readiness probe: `200 {"status":"ok"}` when the service can serve requests, otherwise `503 {"status":"down"}`. For the core, ready means the database answers a `SELECT 1` within about 1 s and no migration is pending; for `delivery`, that the process serves HTTP (from stage 4b also that the outbox listener is connected). `degraded` is reserved in the contract and not produced yet. There is no separate liveness operation; Compose and production health checks call the same endpoint (`delivery` through its own `-healthcheck` flag, since its image has no shell). Health responses contain the status only and are logged at debug level.
 - Service statistics for the operator are counts and durations only (reports per hour, stream connections, push success rate), never coordinates.
 
 ## 11. Testing seams

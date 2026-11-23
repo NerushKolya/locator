@@ -46,6 +46,8 @@ flowchart TB
 
 **Contract validator (stage 1).** Chosen: Gesso 2.10 (MIT; OpenAPI 3.0/3.1/3.2; Symfony adapter; PHPUnit 12/13). Evaluated first per the walking-skeleton research; it loads the whole `api/openapi.yaml` (3.1 constructs included), accepts the `Health` and `RemoteConfig` responses and rejects a wrong `/health` body (`{"status":"fine"}`), a body without `status` and a `RemoteConfig` without required fields. The test helper is `backend/core/tests/Support/AssertsOpenApiResponse.php`; the two fallbacks (`league/openapi-psr7-validator`, plain JSON Schema 2020-12) were not needed.
 
+**Breaking-change check (stage 1).** oasdiff 1.39.0 from the regular `tufin/oasdiff` image (no separate OpenAPI 3.1 tag was needed) parses the whole contract; with a copy that drops `version` from `RemoteConfig` it fails with `response-required-property-removed` as `ERR`, and it reports no breaking change for making `GET /v1/config` public (no waiver). Lint: Redocly CLI 2.82.0. Both images are pinned by digest in `scripts/test-contract.ps1`. Go test reports in JUnit format come from gotestsum ([ADR-026](../architecture/adr/ADR-026-go-test-reports-gotestsum.md)).
+
 **Test identity.** Google ID tokens cannot be produced in tests. A test identity provider issues sessions for scripted users. It is a separate bundle that is not installed in production images; a test asserts its routes return `404` in the production image (security criterion 6).
 
 **Time.** `Clock` is injected everywhere; no test sleeps to wait for time to pass.

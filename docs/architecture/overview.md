@@ -119,11 +119,11 @@ The core is one deployable with strictly separated modules. Each has its own dom
 | **Identity** | `User`, `Device`, sessions, sign-in, age/terms confirmation, account deletion | BR-10 one active device; token rotation |
 | **Groups** | `Group`, `Membership`, `Role`, `Invitation` | Roles (US-014), limits (BR-12), ownership transfer |
 | **Sharing** | `SharingState`, `SharingMode`, `Pause`, `FrequencyProfile`, `Consent`, **visibility policy**, `AccessLogEntry`, `TransparencyView` | BR-01, BR-02, BR-03, BR-04 |
-| **Locations** | Device reports, `LocationPoint`, `CurrentPosition`, `DeviceStatus`, `Freshness`, `LocationRequest`, `ActiveView` leases, retention, remote engine configuration | BR-06, BR-08, BR-09, BR-14 |
+| **Locations** | Device reports, `LocationPoint`, `CurrentPosition`, `DeviceStatus`, `Freshness`, `LocationRequest`, `ActiveView` leases, retention, the meaning and bounds of the engine parameters in the remote configuration | BR-06, BR-08, BR-09, BR-14 |
 | **Places** | `Place`, `PlaceSubscription`, `PlaceTransition` detection | Hysteresis (US-042), subscriptions visible to the subject (US-043) |
 | **Alerts** | `Sos`, `LowBatteryAlert`, `NoUpdatesAlert`, group event notifications, notification preferences, push composition | BR-07, once-per-episode alerts |
 | **Admin** | Admin API for the back office, operator switch, operator actions | BR-11, US-090–US-095 |
-| **Platform** (shared kernel) | Outbox, clock, identifiers, error format, authentication middleware, rate limiting | — |
+| **Platform** (shared kernel) | Outbox, clock, identifiers, error format, authentication middleware, rate limiting, readiness probe, the **remote configuration document** served by `GET /v1/config` (engine parameters, map style URL, limits, legal links; read by every client before sign-in, built-in defaults until the back office publishes versions) | — |
 
 ## 7. Main data paths
 
